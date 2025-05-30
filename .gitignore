@@ -3,7 +3,6 @@
 *.pyo
 __pycache__/
 
-
 # Ansible
 .releases
 .local
@@ -20,3 +19,18 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
+# virtualenv
+venv/
+.tox/
+.nox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.egg
+.installed.cfg
+*.egg-info/
+.dist
+*.spec
+*.log
+.local
