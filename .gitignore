@@ -1,1 +1,36 @@
+# Python
+*.pyc
+*.pyo
+__pycache__/
 
+# Ansible
+.releases
+.local
+
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# virtualenv
+venv/
+.tox/
+.nox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.egg
+.installed.cfg
+*.egg-info/
+.dist
+*.spec
+*.log
+.local
