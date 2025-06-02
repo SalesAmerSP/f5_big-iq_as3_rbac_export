@@ -250,28 +250,53 @@ def main():
     if csvFilename is not None:
         # If the file already exists, append a timestamp to the filename
         csvFilename = 'outputs/' + csvFilename
-        if os.path.isfile(csvFilename):
-            timestamp = int(time.time())
-            csvFilename = f'{csvFilename}_{timestamp}'
-            logger.debug(f'Output file {csvFilename} already exists; appending timestamp to filename')
         with open(csvFilename, 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=['parentApplication', 'parentApplicationId', 'parentApplicationSelfLink', 'name', 'id', 'globalAppId', 'status', 'health', 'activeAlerts', 'enhancedAnalytics', 'deploymentType', 'AS3Declaration', 'tenantName', 'applicationName'])
             writer.writeheader()
             writer.writerows(applicationServiceList)
             logger.debug(f'Output to {csvFilename}: Application List CSV: {applicationList}')
-        
+    else:
+        logger.info('Skipping CSV output as no filename was provided')    
+    
     # Output the list of applications to a JSON
     logger.info('Outputting Application List to JSON')
     if jsonFilename is not None:
         jsonFilename = 'outputs/' + jsonFilename
-        if os.path.isfile(jsonFilename):
-            timestamp = int(time.time())
-            jsonFilename = f'{jsonFilename}_{timestamp}'
-            logger.debug(f'Output file {jsonFilename} already exists; prepending timestamp to filename')
         with open(jsonFilename, 'w') as jsonfile:
             json.dump(applicationServiceList, jsonfile, indent=2)
             logger.debug(f'Output to {jsonFilename}: Application List JSON: {applicationList}')
 
+    # Export RBAC Roles to JSON
+    logger.info('Exporting RBAC Roles to JSON')
+    rbacRoles = bigiq_http_get('mgmt/shared/authorization/roles', {})
+    with open('outputs/rbac_roles.json', 'w') as jsonfile:
+        json.dump(rbacRoles.json(), jsonfile, indent=2)
+        logger.debug(f'Output to outputs/rbac_roles.json: RBAC Roles JSON: {rbacRoles.json()}')
+        
+    # Export RBAC Role Types to JSON
+    rbacRoleTypes = bigiq_http_get('mgmt/shared/authorization/role-types', {"$filter": "isPublic eq 'true' and isBuiltIn eq 'false'"})
+    with open('outputs/rbac_role_types.json', 'w') as jsonfile:
+        json.dump(rbacRoleTypes.json(), jsonfile, indent=2)
+        logger.debug(f'Output to outputs/rbac_role_types.json: RBAC Role Types JSON: {rbacRoleTypes.json()}')
+        
+    # Export RBAC Resource Groups
+    rbacResourceGroups = bigiq_http_get('mgmt/shared/authorization/resource-groups', {"$filter": "isPublic eq 'true' and isBuiltIn eq 'false'"})
+    with open('outputs/rbac_resource_groups.json', 'w') as jsonfile:
+        json.dump(rbacResourceGroups.json(), jsonfile, indent=2)
+        logger.debug(f'Output to outputs/rbac_resource_groups.json: RBAC Resource Groups JSON: {rbacResourceGroups.json()}')
+        
+    # Export RBAC Users
+    rbacUsers = bigiq_http_get('/mgmt/shared/authz/users', {})
+    with open('outputs/rbac_users.json', 'w') as jsonfile:
+        json.dump(rbacUsers.json(), jsonfile, indent=2)
+        logger.debug(f'Output to outputs/rbac_users.json: RBAC Users JSON: {rbacUsers.json()}')
+        
+    # Export RBAC Groups
+    rbacUserGroups = bigiq_http_get('mgmt/shared/authn/providers/local/groups', {})
+    with open('outputs/rbac_user_groups.json', 'w') as jsonfile:
+        json.dump(rbacUserGroups.json(), jsonfile, indent=2)
+        logger.debug(f'Output to outputs/rbac_user_groups.json: RBAC User Groups JSON: {rbacUserGroups.json()}')
+        
 if __name__ == '__main__':
     main()
     terminate_process()
