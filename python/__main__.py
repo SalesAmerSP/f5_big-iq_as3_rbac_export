@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import csv
 import json
 import requests
@@ -7,13 +9,15 @@ import urllib3
 import logging
 import time
 import os
+from pathlib import Path
 
-# Verify that the logging folder exists and create it if not
-if not os.path.exists('logs'):
-    os.makedirs('logs')
+# Constants
+LOG_DIR = Path("logs")
+OUTPUT_DIR = Path("outputs")
 
-if not os.path.exists('outputs'):
-    os.makedirs('outputs')
+# Prepare environment
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG,
@@ -21,34 +25,25 @@ logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s.%(msecs)03d %(levelname)s %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
-
-# Configure console logging
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 console.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger.addHandler(console)
 
-# Log an instantiation message
-logger.info('<----- F5 BIG-IQ AS3 Export (includes RBAC) initiated ----->')
-
 # Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-def global_token_auth():
+# Set default variable values
+auth_token = None
+auth_token_expiry = 0
+
+def global_token_auth(host, username, password):
     global auth_token
     global auth_token_expiry
-    try:
-        auth_token
-        auth_token_expiry
-    except NameError:
-        logger.debug('The variables auth_token or auth_token_expiry not found; creating variables with dummy values')
-        auth_token = 'null'
-        auth_token_expiry = 0
     # Check if current epoch time is less than token expiry;
     # skip token generation if not
-    if (time.time() < auth_token_expiry):
-        remaining_seconds = auth_token_expiry - time.time()
-        logger.debug(f'Existing authentication token is still valid. Expires in {remaining_seconds} seconds.')
+    if time.time() < auth_token_expiry:
+        logger.debug(f"Token still valid. Expires in {auth_token_expiry - time.time()} seconds.")
         return
     # request a new token
     url = f'https://{host}/mgmt/shared/authn/login'
@@ -56,140 +51,110 @@ def global_token_auth():
     headers = {'Content-type': 'application/json'}
     logger.debug(f'Token API call: {url}, {headers}, {username}')
     try:
-        response = requests.post(
-            url,
-            json=payload,
-            headers=headers
-        )
-        response.raise_for_status()  # Raise an exception for bad status codes
-    except requests.exceptions.RequestException as e:
-        logger.error(f'Error making API call: {e}')
-        terminate_process()
-    try:
-        auth_token = response.json()['token']['token']
-        auth_token_expiry = response.json()['token']['exp']
-        logger.debug(f'Auth token retrieved with expiration of {auth_token_expiry} epoch time')
-    except KeyError as e:
-        logger.error(f'Error retrieving auth token: JSON key not found in response: {response.text} - {e}')
-        terminate_process()
+        response = requests.post(url, json=payload, headers=headers, verify=False)
+        response.raise_for_status()
+        data = response.json()['token']
+        auth_token = data['token']
+        auth_token_expiry = data['exp']
+        logger.debug(f"New token retrieved. Expires at {auth_token_expiry} (epoch)")
+    except Exception as e:
+        logger.error(f"Failed to retrieve auth token: {e}")
+        exit_script()
     return
 
-def bigiq_http_get(uri, params):
-    global_token_auth()
-    url = f'https://{host}/{uri}'
-    headers = {
-        'Content-type': 'application/json',
-        'X-F5-Auth-Token': auth_token
-        }
-    logger.debug(f'BIG-IQ HTTP GET URL:{url} {params}')
+def bigiq_http_get(host, username, password, uri, params={}):
+    global_token_auth(host, username, password)
     try:
-        response = requests.get(
-            url,
-            headers=headers,
-            params=params
-        )
+        url = f'https://{host}/{uri}'
+        headers = {
+            'Content-type': 'application/json',
+            'X-F5-Auth-Token': auth_token
+            }
+        logger.debug(f'BIG-IQ HTTP GET {url} {params}')
+        response = requests.get(url,headers=headers,params=params,verify=False)
         response.raise_for_status()  # Raise an exception for bad status codes
+        logger.debug(f'BIG-IP API Response: {response.text}')
+        return response
     except requests.exceptions.RequestException as e:
         logger.error(f'Error making API call: {e}')
-        terminate_process()
-    logger.debug(f'BIG-IP API Response: {response.text}')
-    return response
+        exit_script()
 
 def parse_command_line_arguments():
-    # Define BIG-IQ environment variables
-    global username
-    global password
-    global host
-    global csvFilename
-    global jsonFilename
-    
     # Parse command line arguments
     parser = argparse.ArgumentParser(
         description="Collect AS3 configurations from a BIG-IQ and output them to a CSV or JSON file"
     )
-    parser.add_argument("--username", type=str, help="Username for BIG-IQ")
-    parser.add_argument("--password", type=str, help="Password for BIG-IQ user")
-    parser.add_argument("--hostname", type=str, help="BIG-IQ host (IP/FQDN)")
-    parser.add_argument("--csv", type=str, help="CSV filename to write output")
-    parser.add_argument("--json", type=str, help="JSON filename to write output")
+    parser.add_argument("--username", help="Username for BIG-IQ")
+    parser.add_argument("--password", help="Password for BIG-IQ user")
+    parser.add_argument("--hostname", help="BIG-IQ host (IP/FQDN)")
     
     # Read command line arguments
-    arguments = parser.parse_args()
+    args = parser.parse_args()
     
-    # Prompt for missing arguments
-    if arguments.hostname is None:
-        host = input("Enter the hostname or IP address of the BIG-IQ: ")
-    else:
-        host = arguments.hostname
-    logger.debug(f'BIG-IQ hostname provided: {host}')
+    args.hostname = args.hostname or input("Enter BIG-IQ hostname: ")
+    args.username = args.username or input("Enter BIG-IQ username: ")
+    args.password = args.password or getpass.getpass("Enter BIG-IQ password: ")
 
-    if arguments.username is None:
-        username = input("Enter the username to authenticate with the BIG-IQ: ")
-    else:
-        username = arguments.username
-    logger.debug(f'Username provided: {username}')
-    
-    if arguments.password is None:
-        password = getpass.getpass(prompt='Enter the password to authenticate with the BIG-IQ: ', stream=None)
-    else:
-        password = arguments.password
-    logger.debug(f'Password provided; not logged due to security best practices')
-    
-    # Check for output filenames
-    if arguments.csv is not None:
-        csvFilename = arguments.csv
-        logger.debug(f'CSV filename provided: {csvFilename}')
-    else:
-        logger.warning('No CSV filename provided')
-        csvFilename = None
+    return args.hostname, args.username, args.password
 
-    if arguments.json is not None:
-        jsonFilename = arguments.json
-        logger.debug(f'JSON filename provided: {jsonFilename}')
-    else:
-        logger.warning('No JSON filename provided')
-        jsonFilename = None
-    
-    return host, username, password, arguments.csv, arguments.json
-
-def terminate_process(msg=None):
+def exit_script(msg=None):
     if msg is not None:
         logger.warning(f'{msg}')
-    logger.info('<----- F5 BIG-IQ AS3 Export (includes RBAC) ended ----->')
+    logger.debug('Exiting script due to exit_script function call.')
     SystemExit()
+
+def write_output_csv(filename, data):
+    path = OUTPUT_DIR / filename
+    with open(path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=data[0].keys())
+        writer.writeheader()
+        writer.writerows(data)
+    logger.info(f"CSV written to {path}")
+
+def write_output_json(filename, data):
+    path = OUTPUT_DIR / filename
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+    logger.info(f"JSON written to {path}")
         
 def main():
+    host, username, password = parse_command_line_arguments()
+    
     logger.info('F5 BIG-IQ AS3 Export (includes RBAC) started')
     
     # Parse command line arguments
     logger.debug('Parsing command line arguments') 
     try:
-        host, username, password, csvFilename, jsonFilename = parse_command_line_arguments()
+        host, username, password = parse_command_line_arguments()
     except Exception as e:
         logger.error('Error parsing command line arguments: {}'.format(e))
-        terminate_process()
+        exit_script()
 
     # Retrieve the Application list from the BIG-IQ
     logger.debug('Retrieving Application List from BIG-IQ')
     try:
-        as3_config = bigiq_http_get('mgmt/ap/query/v1/tenants/default/reports/ApplicationsList', {'view': 'all'})
+        as3_config = bigiq_http_get(host, username, password, 'mgmt/ap/query/v1/tenants/default/reports/ApplicationsList', {'view': 'all'})
         logger.debug(f'Application List Text: {as3_config.text}')
         if as3_config is None:
             logger.error('No response returned from BIG-IQ')
-            terminate_process()
+            exit_script()
         else:
             as3_config_json = as3_config.json()
-        logger.debug(f'Application List JSON: {as3_config_json}')
+            logger.debug(f'Application List JSON: {as3_config_json}')
     except Exception as e:
         logger.error(f'Error retrieving AS3 configuration from BIG-IQ at {host}: {e}')
-        terminate_process()
+        exit_script()
 
     # Retrieve the application count from BIG-IQ
-    applicationCount = as3_config_json['result']['totalItems']
-    logger.info(f'Retrieved {applicationCount} applications from BIG-IQ at {host}')
+    try:
+        applicationCount = as3_config_json['result']['totalItems']
+        logger.info(f'Retrieved {applicationCount} applications from BIG-IQ at {host}')
+    except Exception as e:
+        logger.error(f'Error parsing Application count from BIG-IQ at {host}: {e}')
+        exit_script()
     
     # Retrieve all AS3 declarations from BIG-IQ
-    as3_inventory = bigiq_http_get('/mgmt/shared/appsvcs/declare', {})
+    as3_inventory = bigiq_http_get(host, username, password, '/mgmt/shared/appsvcs/declare', {})
     as3_inventory = as3_inventory.json()
 
     # Parse the list of applications returned
@@ -204,99 +169,77 @@ def main():
             applicationList.append(currentApplicationExport)
     except Exception as e:
         logger.error(f'Error parsing Application list from BIG-IQ at {host}: {e}')
-        terminate_process()
+        exit_script()
 
     # Retrieve each application service from BIG-IQ
     logger.info('Retrieving Application Services from BIG-IQ')
     applicationServiceList = []
     for currentApplication in applicationList:
         try:
-            applicationServicesResponse = bigiq_http_get('mgmt/ap/query/v1/tenants/default/reports/ApplicationServicesList', {'$appId': currentApplication['id']})
+            applicationServicesResponse = bigiq_http_get(host, username, password, 'mgmt/ap/query/v1/tenants/default/reports/ApplicationServicesList', {'$appId': currentApplication['id']})
             currentApplicationServiceList = applicationServicesResponse.json()['result']['items']
+            for currentApplicationService in currentApplicationServiceList:
+                logger.debug(f'Processing Application Service: {currentApplicationService}')
+                currentApplicationServiceExport = {}
+                currentApplicationServiceExport['parentApplication'] = currentApplication['name']
+                currentApplicationServiceExport['parentApplicationId'] = currentApplication['id']
+                currentApplicationServiceExport['parentApplicationSelfLink'] = currentApplication['selfLink']
+                currentApplicationServiceExport['name'] = currentApplicationService['name']
+                currentApplicationServiceExport['id'] = currentApplicationService['id']
+                currentApplicationServiceExport['globalAppId'] = currentApplicationService['globalAppId']
+                currentApplicationServiceExport['status'] = currentApplicationService['status']
+                currentApplicationServiceExport['health'] = currentApplicationService['health']
+                currentApplicationServiceExport['activeAlerts'] = currentApplicationService['activeAlerts']              
+                currentApplicationServiceExport['enhancedAnalytics'] = currentApplicationService['enhancedAnalytics']
+                currentApplicationServiceExport['deploymentType'] = currentApplicationService['deploymentType']
+                if currentApplicationService['deploymentType'] == 'AS3':
+                    # Search the list of dictionaries of AS3 declarations for the current application service
+                    tenantName = currentApplicationService['name'].split('_')[0]
+                    applicationName = currentApplicationService['name'].split('_', 1)[1:][0]
+                    for currentDeclaration in as3_inventory:
+                        if tenantName in currentDeclaration.keys():
+                            if applicationName in currentDeclaration[tenantName].keys():
+                                currentApplicationServiceExport['AS3Declaration'] = currentDeclaration
+                                currentApplicationServiceExport['tenantName'] = currentApplicationService['name'].split('_')[0]
+                                currentApplicationServiceExport['applicationName'] = currentApplicationService['name'].split('_', 1)[1:][0]
+                                logger.debug(f'Application service {currentApplicationService["name"]} is AS3; adding AS3 declaration')
+                else:
+                    logger.debug(f'Application service {currentApplicationService["name"]} is not AS3; skipping')
+                applicationServiceList.append(currentApplicationServiceExport)
         except Exception as e:
             logger.error(f'Error retrieving Application Services from BIG-IQ at {host}: {e}')
-            terminate_process()
-        for currentApplicationService in currentApplicationServiceList:
-            logger.debug(f'Processing Application Service: {currentApplicationService}')
-            currentApplicationServiceExport = {}
-            currentApplicationServiceExport['parentApplication'] = currentApplication['name']
-            currentApplicationServiceExport['parentApplicationId'] = currentApplication['id']
-            currentApplicationServiceExport['parentApplicationSelfLink'] = currentApplication['selfLink']
-            currentApplicationServiceExport['name'] = currentApplicationService['name']
-            currentApplicationServiceExport['id'] = currentApplicationService['id']
-            currentApplicationServiceExport['globalAppId'] = currentApplicationService['globalAppId']
-            currentApplicationServiceExport['status'] = currentApplicationService['status']
-            currentApplicationServiceExport['health'] = currentApplicationService['health']
-            currentApplicationServiceExport['activeAlerts'] = currentApplicationService['activeAlerts']              
-            currentApplicationServiceExport['enhancedAnalytics'] = currentApplicationService['enhancedAnalytics']
-            currentApplicationServiceExport['deploymentType'] = currentApplicationService['deploymentType']
-            if currentApplicationService['deploymentType'] == 'AS3':
-                # Search the list of dictionaries of AS3 declarations for the current application service
-                tenantName = currentApplicationService['name'].split('_')[0]
-                applicationName = currentApplicationService['name'].split('_', 1)[1:][0]
-                for currentDeclaration in as3_inventory:
-                    if tenantName in currentDeclaration.keys():
-                        if applicationName in currentDeclaration[tenantName].keys():
-                            currentApplicationServiceExport['AS3Declaration'] = currentDeclaration
-                            currentApplicationServiceExport['tenantName'] = currentApplicationService['name'].split('_')[0]
-                            currentApplicationServiceExport['applicationName'] = currentApplicationService['name'].split('_', 1)[1:][0]
-                            logger.debug(f'Application service {currentApplicationService["name"]} is AS3; adding AS3 declaration')
-            else:
-                logger.debug(f'Application service {currentApplicationService["name"]} is not AS3; skipping')
-            applicationServiceList.append(currentApplicationServiceExport)
+            exit_script()
+
 
     # Output the list of applications to a CSV    
     logger.info('Outputting Application List to CSV')
-    if csvFilename is not None:
-        # If the file already exists, append a timestamp to the filename
-        csvFilename = 'outputs/' + csvFilename
-        with open(csvFilename, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=['parentApplication', 'parentApplicationId', 'parentApplicationSelfLink', 'name', 'id', 'globalAppId', 'status', 'health', 'activeAlerts', 'enhancedAnalytics', 'deploymentType', 'AS3Declaration', 'tenantName', 'applicationName'])
-            writer.writeheader()
-            writer.writerows(applicationServiceList)
-            logger.debug(f'Output to {csvFilename}: Application List CSV: {applicationList}')
-    else:
-        logger.info('Skipping CSV output as no filename was provided')    
+    with open('outputs/app_services_inventory.csv', 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=['parentApplication', 'parentApplicationId', 'parentApplicationSelfLink', 'name', 'id', 'globalAppId', 'status', 'health', 'activeAlerts', 'enhancedAnalytics', 'deploymentType', 'AS3Declaration', 'tenantName', 'applicationName'])
+        writer.writeheader()
+        writer.writerows(applicationServiceList)
+        logger.debug(f'Output to file: Application List CSV: {applicationServiceList}')
     
     # Output the list of applications to a JSON
     logger.info('Outputting Application List to JSON')
-    if jsonFilename is not None:
-        jsonFilename = 'outputs/' + jsonFilename
-        with open(jsonFilename, 'w') as jsonfile:
-            json.dump(applicationServiceList, jsonfile, indent=2)
-            logger.debug(f'Output to {jsonFilename}: Application List JSON: {applicationList}')
+    with open('outputs/app_services_inventory.json', 'w') as jsonfile:
+        json.dump(applicationServiceList, jsonfile, indent=2)
+        logger.debug(f'Output to file: Application List JSON: {applicationServiceList}')
 
-    # Export RBAC Roles to JSON
-    logger.info('Exporting RBAC Roles to JSON')
-    rbacRoles = bigiq_http_get('mgmt/shared/authorization/roles', {})
-    with open('outputs/rbac_roles.json', 'w') as jsonfile:
-        json.dump(rbacRoles.json(), jsonfile, indent=2)
-        logger.debug(f'Output to outputs/rbac_roles.json: RBAC Roles JSON: {rbacRoles.json()}')
-        
-    # Export RBAC Role Types to JSON
-    rbacRoleTypes = bigiq_http_get('mgmt/shared/authorization/role-types', {"$filter": "isPublic eq 'true' and isBuiltIn eq 'false'"})
-    with open('outputs/rbac_role_types.json', 'w') as jsonfile:
-        json.dump(rbacRoleTypes.json(), jsonfile, indent=2)
-        logger.debug(f'Output to outputs/rbac_role_types.json: RBAC Role Types JSON: {rbacRoleTypes.json()}')
-        
-    # Export RBAC Resource Groups
-    rbacResourceGroups = bigiq_http_get('mgmt/shared/authorization/resource-groups', {"$filter": "isPublic eq 'true' and isBuiltIn eq 'false'"})
-    with open('outputs/rbac_resource_groups.json', 'w') as jsonfile:
-        json.dump(rbacResourceGroups.json(), jsonfile, indent=2)
-        logger.debug(f'Output to outputs/rbac_resource_groups.json: RBAC Resource Groups JSON: {rbacResourceGroups.json()}')
-        
-    # Export RBAC Users
-    rbacUsers = bigiq_http_get('/mgmt/shared/authz/users', {})
-    with open('outputs/rbac_users.json', 'w') as jsonfile:
-        json.dump(rbacUsers.json(), jsonfile, indent=2)
-        logger.debug(f'Output to outputs/rbac_users.json: RBAC Users JSON: {rbacUsers.json()}')
-        
-    # Export RBAC Groups
-    rbacUserGroups = bigiq_http_get('mgmt/shared/authn/providers/local/groups', {})
-    with open('outputs/rbac_user_groups.json', 'w') as jsonfile:
-        json.dump(rbacUserGroups.json(), jsonfile, indent=2)
-        logger.debug(f'Output to outputs/rbac_user_groups.json: RBAC User Groups JSON: {rbacUserGroups.json()}')
-        
+    # Export RBAC sections
+    rbac_endpoints = {
+        'rbac_roles.json': 'mgmt/shared/authorization/roles',
+        'rbac_role_types.json': 'mgmt/shared/authorization/role-types',
+        'rbac_resource_groups.json': 'mgmt/shared/authorization/resource-groups',
+        'rbac_users.json': '/mgmt/shared/authz/users',
+        'rbac_user_groups.json': 'mgmt/shared/authn/providers/local/groups'
+    }   
+    
+    for filename, endpoint in rbac_endpoints.items():
+        response = bigiq_http_get(host, username, password, endpoint, {})
+        write_output_json(filename, response.json())
+            
+    logger.info("RBAC export completed.")
+
 if __name__ == '__main__':
     main()
-    terminate_process()
+    exit_script()
