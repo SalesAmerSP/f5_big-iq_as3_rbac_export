@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Unknown Applications",
+    "id": "69cf49ad-de27-3540-b38f-9773d06ca1c4",
+    "selfLink": "https://localhost/mgmt/cm/global/global-apps/69cf49ad-de27-3540-b38f-9773d06ca1c4",
+    "serviceCount": 0
+  },
+  {
+    "name": "airport_security",
+    "id": "005dd97c-c55e-3d38-a157-1c7a217334f6",
+    "selfLink": "https://localhost/mgmt/cm/global/global-apps/005dd97c-c55e-3d38-a157-1c7a217334f6",
+    "serviceCount": 3
+  },
+  {
+    "name": "finance_apps",
+    "id": "8ac85799-3134-3c3c-9260-abe3369ecfe6",
+    "selfLink": "https://localhost/mgmt/cm/global/global-apps/8ac85799-3134-3c3c-9260-abe3369ecfe6",
+    "serviceCount": 4
+  },
+  {
+    "name": "IT_apps",
+    "id": "c671ad43-9420-354e-942a-d8b9d865e08c",
+    "selfLink": "https://localhost/mgmt/cm/global/global-apps/c671ad43-9420-354e-942a-d8b9d865e08c",
+    "serviceCount": 3
+  }
+]
