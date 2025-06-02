@@ -1,26 +1,53 @@
-# F5 BIG-IQ AS3 Export (includes RBAC)
-======================================
+# F5 BIG-IQ AS3 Export
 
-This tool extracts the AS3 configuration from a BIG-IQ instance and exports it to a file. It also exports the RBAC configuration from the BIG-IQ instance.
+This repository contains scripts for exporting AS3 configurations from an F5 BIG-IQ system. The configurations can be output to either a CSV or JSON file, and include Role-Based Access Control (RBAC) considerations.
 
-## Getting Started
-------------------
+## Prerequisites
 
-To use this repository, follow these steps:
+- Python 3.x
+- Required Python packages are listed in `requirements.txt`. Install them using:
 
-1. Clone the repository to your local machine.
-2. Navigate to the root directory of the repository.
-3. Run the `install.sh` script to install the required dependencies.
-4. Run the `as3_export.py` script to export the AS3 configuration.
-5. Run the `rbac_export.py` script to export the RBAC configuration.
+  ```bash
+  pip install -r requirements.txt
+  ```
 
-## Contributing
-------------
+## Usage
 
-Please fork this repository and submit pull requests.
+1. Clone the repository:
+
+   ```bash
+   git clone <repository-url>
+   ```
+
+2. Navigate to the repository directory:
+
+   ```bash
+   cd <repository-directory>
+   ```
+
+3. Run the script with the required arguments:
+
+   ```bash
+   python __main__.py --username <BIG-IQ-username> --password <BIG-IQ-password> --hostname <BIG-IQ-host> --csv <output-csv-file> --json <output-json-file>
+   ```
+
+   If any arguments are omitted, the script will prompt you to input them.
+
+## Logging
+
+Logs are stored in the `logs/f5_as3.log` file. Console output is also configured for logging important information.
+
+## Disabling SSL Warnings
+
+SSL warnings are disabled using the `urllib3` library to prevent clutter in the logs.
+
+## Functions
+
+- **`parse_command_line_arguments()`**: Parses and handles command line arguments.
+- **`global_token_auth()`**: Manages authentication token retrieval and caching.
+- **`bigiq_http_get(uri, params)`**: Performs HTTP GET requests to the BIG-IQ API.
+- **`main()`**: Orchestrates the export process, including retrieving and parsing application data.
 
 ## License
--------
 
-F5, Inc. nor myself officially support this project. Please use at your own risk.
-
+This project is licensed under the MIT License. See the LICENSE file for details.
