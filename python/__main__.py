@@ -214,9 +214,10 @@ def main():
     # Output the list of applications to a CSV    
     logger.info('Outputting Application List to CSV')
     with open('outputs/app_services_inventory.csv', 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=['parentApplication', 'parentApplicationId', 'parentApplicationSelfLink', 'name', 'id', 'globalAppId', 'status', 'health', 'activeAlerts', 'enhancedAnalytics', 'deploymentType', 'AS3Declaration', 'tenantName', 'applicationName'])
+        writer = csv.DictWriter(csvfile, fieldnames=['parentApplication', 'parentApplicationId', 'parentApplicationSelfLink', 'name', 'id', 'globalAppId', 'status', 'health', 'activeAlerts', 'enhancedAnalytics', 'deploymentType', 'tenantName', 'applicationName'])
         writer.writeheader()
-        writer.writerows(applicationServiceList)
+        for row in applicationServiceList:
+            writer.writerow({key: row.get(key, '') for key in writer.fieldnames})
         logger.debug(f'Output to file: Application List CSV: {applicationServiceList}')
     
     # Output the list of applications to a JSON
