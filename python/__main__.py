@@ -62,7 +62,7 @@ def global_token_auth(host, username, password):
         exit_script()
     return
 
-def bigiq_http_get(host, username, password, uri, params={}):
+def bigiq_http_get(host, username, password, uri, params):
     global_token_auth(host, username, password)
     try:
         url = f'https://{host}/{uri}'
@@ -117,9 +117,12 @@ def write_output_json(filename, data):
         json.dump(data, f, indent=2)
     logger.info(f"JSON written to {path}")
         
-def main():
-    host, username, password = parse_command_line_arguments()
+if __name__ == '__main__':
+    ##
+    ## Main application code is in this function
+    ##
     
+    # Start logging
     logger.info('F5 BIG-IQ AS3 Export (includes RBAC) started')
     
     # Parse command line arguments
@@ -130,10 +133,30 @@ def main():
         logger.error('Error parsing command line arguments: {}'.format(e))
         exit_script()
 
+    # Retrieve a list of devices from BIG-IQ
+    logger.debug('Retrieving device list from BIG-IQ')
+    try:
+        device_inventory_response = bigiq_http_get(host, username, password, '/mgmt/shared/resolver/device-groups/cm-bigip-allBigIpDevices/devices', {"$top": 1000})
+        device_inventory_response = device_inventory_response.json()
+        # Find the number of devices found in BIG-IQ
+        device_count = device_inventory_response['totalItems']
+        logger.info(f'Found {device_count} devices in BIG-IQ')
+        # Extract the device list
+        device_inventory_detailed = device_inventory_response['items']
+        # Create a mgmt IP to hostname mapping dictionary
+        bigip_host_mapping = {}
+        for current_device in device_inventory_detailed:
+            bigip_host_mapping[current_device['address']] = current_device['hostname']
+            logger.debug(f'Found device {current_device['hostname']} at {current_device["address"]}')
+        logger.debug(f'Device List JSON: {device_inventory_detailed}')
+    except Exception as e:
+        logger.error(f'Error retrieving device list from BIG-IQ at {host}: {e}')
+        exit_script()
+
     # Retrieve the Application list from the BIG-IQ
     logger.debug('Retrieving Application List from BIG-IQ')
     try:
-        as3_config = bigiq_http_get(host, username, password, 'mgmt/ap/query/v1/tenants/default/reports/ApplicationsList', {'view': 'all'})
+        as3_config = bigiq_http_get(host, username, password, 'mgmt/ap/query/v1/tenants/default/reports/ApplicationsList', {'view': 'all', "$top": 1000})
         logger.debug(f'Application List Text: {as3_config.text}')
         if as3_config is None:
             logger.error('No response returned from BIG-IQ')
@@ -200,12 +223,15 @@ def main():
                         if tenantName in currentDeclaration.keys():
                             if applicationName in currentDeclaration[tenantName].keys():
                                 currentApplicationServiceExport['AS3Declaration'] = currentDeclaration
+                                currentApplicationServiceExport['target'] = currentDeclaration['target']['address']
+                                currentApplicationServiceExport['hostname'] = bigip_host_mapping[currentDeclaration['target']['address']]
                                 currentApplicationServiceExport['tenantName'] = currentApplicationService['name'].split('_')[0]
                                 currentApplicationServiceExport['applicationName'] = currentApplicationService['name'].split('_', 1)[1:][0]
                                 logger.debug(f'Application service {currentApplicationService["name"]} is AS3; adding AS3 declaration')
                 else:
                     logger.debug(f'Application service {currentApplicationService["name"]} is not AS3; skipping')
                 applicationServiceList.append(currentApplicationServiceExport)
+                logger.debug(f'Recognized Application Service: {currentApplicationServiceExport}')
         except Exception as e:
             logger.error(f'Error retrieving Application Services from BIG-IQ at {host}: {e}')
             exit_script()
@@ -214,7 +240,7 @@ def main():
     # Output the list of applications to a CSV    
     logger.info('Outputting Application List to CSV')
     with open('outputs/app_services_inventory.csv', 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=['parentApplication', 'parentApplicationId', 'parentApplicationSelfLink', 'name', 'id', 'globalAppId', 'status', 'health', 'activeAlerts', 'enhancedAnalytics', 'deploymentType', 'tenantName', 'applicationName'])
+        writer = csv.DictWriter(csvfile, fieldnames=['parentApplication', 'parentApplicationId', 'parentApplicationSelfLink', 'name', 'id', 'globalAppId', 'status', 'health', 'activeAlerts', 'enhancedAnalytics', 'deploymentType', 'tenantName', 'applicationName', 'target', 'hostname'])
         writer.writeheader()
         for row in applicationServiceList:
             writer.writerow({key: row.get(key, '') for key in writer.fieldnames})
@@ -240,7 +266,5 @@ def main():
         write_output_json(filename, response.json())
             
     logger.info("RBAC export completed.")
-
-if __name__ == '__main__':
-    main()
+    
     exit_script()
