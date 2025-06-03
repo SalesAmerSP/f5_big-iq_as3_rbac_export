@@ -28,7 +28,7 @@ This repository contains scripts for exporting AS3 configurations from an F5 BIG
 3. Run the script with the required arguments:
 
    ```bash
-   python __main__.py --username <BIG-IQ-username> --password <BIG-IQ-password> --hostname <BIG-IQ-host> --csv <output-csv-file> --json <output-json-file>
+   python __main__.py --username <BIG-IQ-username> --password <BIG-IQ-password> --hostname <BIG-IQ-host>
    ```
 
    If any arguments are omitted, the script will prompt you to input them.
