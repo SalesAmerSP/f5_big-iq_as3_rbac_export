@@ -62,7 +62,7 @@ def global_token_auth(host, username, password):
         exit_script()
     return
 
-def bigiq_http_get(host, username, password, uri, params={}):
+def bigiq_http_get(host, username, password, uri, params):
     global_token_auth(host, username, password)
     try:
         url = f'https://{host}/{uri}'
@@ -117,9 +117,12 @@ def write_output_json(filename, data):
         json.dump(data, f, indent=2)
     logger.info(f"JSON written to {path}")
         
-def main():
-    host, username, password = parse_command_line_arguments()
+if __name__ == '__main__':
+    ##
+    ## Main application code is in this function
+    ##
     
+    # Start logging
     logger.info('F5 BIG-IQ AS3 Export (includes RBAC) started')
     
     # Parse command line arguments
@@ -133,7 +136,7 @@ def main():
     # Retrieve the Application list from the BIG-IQ
     logger.debug('Retrieving Application List from BIG-IQ')
     try:
-        as3_config = bigiq_http_get(host, username, password, 'mgmt/ap/query/v1/tenants/default/reports/ApplicationsList', {'view': 'all'})
+        as3_config = bigiq_http_get(host, username, password, 'mgmt/ap/query/v1/tenants/default/reports/ApplicationsList', {'view': 'all', "$top": 500})
         logger.debug(f'Application List Text: {as3_config.text}')
         if as3_config is None:
             logger.error('No response returned from BIG-IQ')
@@ -200,12 +203,14 @@ def main():
                         if tenantName in currentDeclaration.keys():
                             if applicationName in currentDeclaration[tenantName].keys():
                                 currentApplicationServiceExport['AS3Declaration'] = currentDeclaration
+                                currentApplicationServiceExport['target'] = currentDeclaration['target']['address']
                                 currentApplicationServiceExport['tenantName'] = currentApplicationService['name'].split('_')[0]
                                 currentApplicationServiceExport['applicationName'] = currentApplicationService['name'].split('_', 1)[1:][0]
                                 logger.debug(f'Application service {currentApplicationService["name"]} is AS3; adding AS3 declaration')
                 else:
                     logger.debug(f'Application service {currentApplicationService["name"]} is not AS3; skipping')
                 applicationServiceList.append(currentApplicationServiceExport)
+                logger.debug(f'Recognized Application Service: {currentApplicationServiceExport}')
         except Exception as e:
             logger.error(f'Error retrieving Application Services from BIG-IQ at {host}: {e}')
             exit_script()
@@ -240,7 +245,5 @@ def main():
         write_output_json(filename, response.json())
             
     logger.info("RBAC export completed.")
-
-if __name__ == '__main__':
-    main()
+    
     exit_script()
